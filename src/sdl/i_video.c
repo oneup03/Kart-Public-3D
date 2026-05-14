@@ -87,7 +87,7 @@
 #endif
 
 // maximum number of windowed modes (see windowedModes[][])
-#define MAXWINMODES (18)
+#define MAXWINMODES (14)
 
 /**	\brief
 */
@@ -153,24 +153,20 @@ static const char *fallback_resolution_name = "Fallback";
 // windowed video modes from which to choose from.
 static INT32 windowedModes[MAXWINMODES][2] =
 {
-	{1920,1200}, // 1.60,6.00
-	{1920,1080}, // 1.66
-	{1680,1050}, // 1.60,5.25
-	{1600,1200}, // 1.33
-	{1600, 900}, // 1.66
-	{1366, 768}, // 1.66
-	{1440, 900}, // 1.60,4.50
-	{1280,1024}, // 1.33?
-	{1280, 960}, // 1.33,4.00
-	{1280, 800}, // 1.60,4.00
-	{1280, 720}, // 1.66
-	{1152, 864}, // 1.33,3.60
-	{1024, 768}, // 1.33,3.20
-	{ 800, 600}, // 1.33,2.50
-	{ 640, 480}, // 1.33,2.00
-	{ 640, 400}, // 1.60,2.00
-	{ 320, 240}, // 1.33,1.00
-	{ 320, 200}, // 1.60,1.00
+	{3840,2160}, // 16:9
+	{3200,1800}, // 16:9
+	{2560,1440}, // 16:9
+	{1920,1200}, // 16:10
+	{1920,1080}, // 16:9
+	{1680,1050}, // 16:10
+	{1600,1200}, // 4:3
+	{1600, 900}, // 16:9
+	{1440, 900}, // 16:10
+	{1366, 768}, // 16:9
+	{1280,1024}, // 5:4
+	{1280, 960}, // 4:3
+	{1280, 800}, // 16:10
+	{1280, 720}, // 16:9
 };
 
 static void Impl_VideoSetupSDLBuffer(void);
@@ -1689,18 +1685,28 @@ INT32 VID_SetMode(INT32 modeNum)
 	}
 	else
 	{
-		// just set the desktop resolution as a fallback
+		// Mode isn't in our list (fallback resolution): use the desktop
+		// resolution. At startup the window doesn't exist yet, so fall back
+		// to the smallest known windowed mode instead of reading uninitialized
+		// data from a failed SDL_GetWindowDisplayMode call.
 		SDL_DisplayMode mode;
-		SDL_GetWindowDisplayMode(window, &mode);
-		if (mode.w >= 2048)
+		if (window != NULL && SDL_GetWindowDisplayMode(window, &mode) == 0)
 		{
-			vid.width = 1920;
-			vid.height = 1200;
+			if (mode.w >= 2048)
+			{
+				vid.width = 1920;
+				vid.height = 1200;
+			}
+			else
+			{
+				vid.width = mode.w;
+				vid.height = mode.h;
+			}
 		}
 		else
 		{
-			vid.width = mode.w;
-			vid.height = mode.h;
+			vid.width = windowedModes[MAXWINMODES-1][0];
+			vid.height = windowedModes[MAXWINMODES-1][1];
 		}
 		vid.modenum = -1;
 	}
@@ -1949,8 +1955,13 @@ void I_StartupGraphics(void)
 #endif
 		if (rendermode == render_none)
 		{
+#ifdef HWRENDER
+			rendermode = render_opengl;
+			CONS_Printf("Using default OpenGL renderer.\n");
+#else
 			rendermode = render_soft;
 			CONS_Printf("Using default software renderer.\n");
+#endif
 		}
 	}
 	else
