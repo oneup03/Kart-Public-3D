@@ -1,0 +1,58 @@
+{
+	// Build tasks for SRB2Kart 3D. These shell out to build.sh via git-bash,
+	// since the Makefile recipes need a Unix shell (sed, bash, etc.).
+	"version": "2.0.0",
+	"options": {
+		"shell": {
+			"executable": "C:\\Program Files\\Git\\bin\\bash.exe",
+			"args": ["-c"]
+		}
+	},
+	"tasks": [
+		{
+			"label": "Build srb2kart (Release)",
+			"type": "shell",
+			"command": "./build.sh",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"problemMatcher": ["$gcc"],
+			"presentation": {
+				"reveal": "always",
+				"panel": "shared",
+				"clear": true
+			},
+			"detail": "Rebuild bundled libs + compile bin/Mingw64/Release/srb2kart.exe and stage DLLs"
+		},
+		{
+			"label": "Build srb2kart (Clean)",
+			"type": "shell",
+			"command": "./build.sh --clean",
+			"group": "build",
+			"problemMatcher": ["$gcc"],
+			"presentation": {
+				"reveal": "always",
+				"panel": "shared",
+				"clear": true
+			},
+			"detail": "Full rebuild: make clean for the Mingw64 target, then build"
+		},
+		{
+			"label": "Run srb2kart",
+			"type": "shell",
+			"command": "./srb2kart.exe",
+			"options": {
+				"cwd": "${workspaceFolder}/bin/Mingw64/Release"
+			},
+			"group": "test",
+			"problemMatcher": [],
+			"dependsOn": "Build srb2kart (Release)",
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated"
+			},
+			"detail": "Build (if needed) and launch the game"
+		}
+	]
+}

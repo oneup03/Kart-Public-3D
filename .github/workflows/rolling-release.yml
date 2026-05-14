@@ -1,0 +1,68 @@
+name: Rolling Release
+
+# Builds the 64-bit Windows binary on every branch push and publishes it as a
+# per-branch "rolling" prerelease (tag: rolling-<branch>) that is replaced on
+# each push. Can also be triggered manually.
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rolling-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-win64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install MinGW-w64 cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            make gcc-mingw-w64-x86-64-win32 binutils-mingw-w64-x86-64
+
+      - name: Build
+        run: bash build.sh --clean
+
+      - name: Package
+        id: package
+        run: |
+          BRANCH="${GITHUB_REF_NAME//\//-}"
+          PKG="srb2kart-3d-${BRANCH}-win64.zip"
+
+          # Assemble a runnable package: exe + runtime DLLs + game assets.
+          mkdir -p dist
+          cp bin/Mingw64/Release/srb2kart.exe bin/Mingw64/Release/*.dll dist/
+
+          # Game data files (.kart/.srb) from the upstream Kart-Public v1.6 release.
+          curl -fSL -o assets.zip \
+            https://github.com/STJr/Kart-Public/releases/download/v1.6/AssetsLinuxOnly.zip
+          unzip -o assets.zip -d dist/
+          rm assets.zip
+
+          (cd dist && zip -r "../${PKG}" .)
+          echo "pkg=${PKG}" >> "$GITHUB_OUTPUT"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="rolling-${{ steps.package.outputs.branch }}"
+          # Remove the previous rolling release+tag for this branch, then
+          # recreate it pointing at the current commit.
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" \
+            --title "Rolling build: ${GITHUB_REF_NAME}" \
+            --notes "Automated 64-bit Windows build of \`${GITHUB_REF_NAME}\` at \`${GITHUB_SHA:0:8}\`, built $(date -u '+%Y-%m-%d %H:%M UTC')." \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            "${{ steps.package.outputs.pkg }}"
