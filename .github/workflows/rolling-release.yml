@@ -2,7 +2,11 @@ name: Rolling Release
 
 # Builds the 64-bit Windows binary on every branch push and publishes it as a
 # per-branch "rolling" prerelease (tag: rolling-<branch>) that is replaced on
-# each push. Can also be triggered manually.
+# each push. The MSVC-built LeiaSR shim DLL is produced by a separate
+# windows-latest job and picked up by the main MinGW cross-compile job; if
+# the shim job fails (e.g. SUBMODULE_PAT not configured), the main artifact
+# still ships, just without LeiaSR autostereo support (mode falls back to
+# plain Side-by-Side at runtime). Can also be triggered manually.
 
 on:
   push:
@@ -17,10 +21,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Build the optional LeiaSR shim DLL on a real Windows runner with MSVC.
+  # The LeiaSR64 submodule is private, so this needs a personal access token
+  # with read access to it - stored as the SUBMODULE_PAT repository secret.
+  # The whole job is allowed to fail without taking the release down with it.
+  build-shim-win64:
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout (with private submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULE_PAT || github.token }}
+
+      - name: Configure shim
+        run: cmake -S leiasr_shim -B leiasr_shim/build -A x64
+
+      - name: Build shim
+        run: cmake --build leiasr_shim/build --config Release
+
+      - name: Upload shim DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: leiasr-shim
+          path: leiasr_shim/build/Release/leiasr_shim.dll
+          if-no-files-found: error
+
   build-win64:
     runs-on: ubuntu-latest
+    # Wait for the shim job to settle, but run even if it failed - the main
+    # binary doesn't need the shim to be valid; LeiaSR mode just falls back.
+    needs: [build-shim-win64]
+    if: always()
     steps:
       - name: Checkout
+        # Skip submodules here - the cross-compiled MinGW build doesn't need
+        # any LeiaSR64 sources, only the prebuilt shim DLL from the other job.
         uses: actions/checkout@v4
 
       - name: Install MinGW-w64 cross toolchain
@@ -29,8 +66,21 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             make gcc-mingw-w64-x86-64-win32 binutils-mingw-w64-x86-64
 
+      - name: Download LeiaSR shim DLL (optional)
+        # Land it where build.sh's staging block expects it. If the shim job
+        # failed/was-skipped, this step does nothing and the main build just
+        # ships without the DLL - LeiaSR mode silently falls back to SbS.
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: leiasr-shim
+          path: leiasr_shim/build/Release/
+
       - name: Build
-        run: bash build.sh --clean
+        # --no-shim because the Linux runner has no MSVC; the shim DLL (if
+        # any) was already produced by the windows-latest job above and
+        # placed where the staging block can find it.
+        run: bash build.sh --clean --no-shim
 
       - name: Package
         id: package
@@ -39,6 +89,9 @@ jobs:
           PKG="srb2kart-3d-${BRANCH}-win64.zip"
 
           # Assemble a runnable package: exe + runtime DLLs + game assets.
+          # build.sh staged leiasr_shim.dll into bin/Mingw64/Release alongside
+          # the other runtime DLLs if the artifact download above succeeded,
+          # so the `*.dll` glob picks it up automatically.
           mkdir -p dist
           cp bin/Mingw64/Release/srb2kart.exe bin/Mingw64/Release/*.dll dist/
 

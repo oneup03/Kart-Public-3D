@@ -60,6 +60,7 @@ int	snprintf(char *str, size_t n, const char *fmt, ...);
 #include "p_saveg.h"
 #include "r_main.h"
 #include "r_local.h"
+#include "r_stereo.h"
 #include "s_sound.h"
 #include "st_stuff.h"
 #include "v_video.h"
@@ -269,12 +270,20 @@ void D_ProcessEvents(void)
 // added comment : there is a wipe eatch change of the gamestate
 gamestate_t wipegamestate = GS_LEVEL;
 
+// The solid fade-to-black fill drawn into the wipe-start frame, factored out
+// so it can be drawn per-eye in stereo.
+static void D_DrawWipeFadeFill(void)
+{
+	V_DrawFill(0, 0, BASEVIDWIDTH, BASEVIDHEIGHT, 31);
+}
+
 static void D_Display(void)
 {
 	boolean forcerefresh = false;
 	static boolean wipe = false;
 	INT32 wipedefindex = 0;
 	UINT8 i;
+	INT32 eye_pass; // stereoscopic 3D: which eye is being rendered
 
 	if (!dedicated)
 	{
@@ -323,7 +332,7 @@ static void D_Display(void)
 			 && wipedefs[wipedefindex] != UINT8_MAX)
 			{
 				F_WipeStartScreen();
-				V_DrawFill(0, 0, BASEVIDWIDTH, BASEVIDHEIGHT, 31);
+				R_DrawAcrossStereoEyes(D_DrawWipeFadeFill);
 				F_WipeEndScreen();
 				F_RunWipe(wipedefs[wipedefindex], gamestate != GS_TIMEATTACK);
 			}
@@ -345,6 +354,27 @@ static void D_Display(void)
 
 	if (dedicated) //bail out after wipe logic
 		return;
+
+	// Stereoscopic 3D: render the whole pipeline once per eye. With stereo
+	// off, R_StereoNumEyes() returns 1 and this loop behaves exactly as the
+	// old single-pass D_Display did - including leaving NetUpdate untouched.
+	net_stereo_render_in_progress = R_StereoActive();
+#ifdef HWRENDER
+	if (R_StereoActive())
+		HWR_ClearStereoBackbuffer(); // one full-screen clear before the eye loop
+#endif
+
+	for (eye_pass = 0; eye_pass < R_StereoNumEyes(); eye_pass++)
+	{
+#ifdef HWRENDER
+	if (R_StereoActive())
+	{
+		INT32 ex, ey, ew, eh;
+		R_StereoComputePlayerEyeRect(R_StereoMode(), eye_pass, -1, &ex, &ey, &ew, &eh);
+		HWR_SetStereoMode(R_StereoMode(), eye_pass, ex, ey, ew, eh);
+	}
+#endif
+	R_BeginStereoEye(eye_pass);
 
 	// do buffered drawing
 	switch (gamestate)
@@ -450,7 +480,19 @@ static void D_Display(void)
 
 #ifdef HWRENDER
 					if (rendermode != render_soft)
+					{
+						// Stereo: set this player's per-eye viewport before the
+						// render, so HWR_ClearView's depth clear is scissored
+						// to the right region. player_idx i picks the
+						// splitscreen sub-region within the eye's half.
+						if (R_StereoActive())
+						{
+							INT32 ex, ey, ew, eh;
+							R_StereoComputePlayerEyeRect(R_StereoMode(), eye_pass, i, &ex, &ey, &ew, &eh);
+							HWR_SetStereoMode(R_StereoMode(), eye_pass, ex, ey, ew, eh);
+						}
 						HWR_RenderPlayerView(i, &players[displayplayers[i]]);
+					}
 					else
 #endif
 					if (rendermode != render_none)
@@ -519,6 +561,15 @@ static void D_Display(void)
 			lastdraw = false;
 		}
 
+#ifdef HWRENDER
+		// Stereo: restore the full per-eye region for the HUD pass.
+		if (R_StereoActive())
+		{
+			INT32 ex, ey, ew, eh;
+			R_StereoComputePlayerEyeRect(R_StereoMode(), eye_pass, -1, &ex, &ey, &ew, &eh);
+			HWR_SetStereoMode(R_StereoMode(), eye_pass, ex, ey, ew, eh);
+		}
+#endif
 		ST_Drawer();
 		HU_Drawer();
 	}
@@ -561,6 +612,16 @@ static void D_Display(void)
 	I_unlock_mutex(m_menu_mutex);
 #endif
 	// focus lost moved to M_Drawer
+
+	R_EndStereoEye();
+	} // end of the stereoscopic 3D eye loop
+
+	R_SetBackbufferIsStereo(R_StereoActive());
+#ifdef HWRENDER
+	if (R_StereoActive())
+		HWR_ResetStereoMode();
+#endif
+	net_stereo_render_in_progress = false;
 
 	//
 	// wipe update

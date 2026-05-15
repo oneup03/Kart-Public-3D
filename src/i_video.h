@@ -137,4 +137,11 @@ void I_EndRead(void);
 
 UINT32 I_GetRefreshRate(void);
 
+/** \brief Native OS window handle.
+	On Windows this returns the SDL window's HWND for the LeiaSR shim loader
+	(r_stereo_leiasr.c) to hand to the SR weaver. Returns NULL when the
+	window hasn't been created yet or on non-Windows builds.
+*/
+void *I_GetWindowHandle(void);
+
 #endif

@@ -125,6 +125,8 @@ set(SRB2_CORE_RENDER_SOURCES
 	r_segs.c
 	r_sky.c
 	r_splats.c
+	r_stereo.c
+	r_stereo_leiasr.c
 	r_things.c
 
 	r_bsp.h
@@ -139,6 +141,8 @@ set(SRB2_CORE_RENDER_SOURCES
 	r_sky.h
 	r_splats.h
 	r_state.h
+	r_stereo.h
+	r_stereo_leiasr.h
 	r_things.h
 )
 

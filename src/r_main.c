@@ -19,6 +19,7 @@
 #include "r_local.h"
 #include "r_splats.h" // faB(21jan): testing
 #include "r_sky.h"
+#include "r_stereo.h" // stereoscopic 3D
 #include "st_stuff.h"
 #include "p_local.h"
 #include "keys.h"
@@ -1524,6 +1525,9 @@ void R_RegisterEngineStuff(void)
 	CV_RegisterVar(&cv_translucenthud);
 
 	CV_RegisterVar(&cv_maxportals);
+
+	// Stereoscopic 3D console variables.
+	R_RegisterStereoVars();
 
 	// Default viewheight is changeable,
 	// initialized to standard viewheight

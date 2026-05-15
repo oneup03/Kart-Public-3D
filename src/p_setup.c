@@ -48,6 +48,7 @@
 
 #include "dehacked.h" // for map headers
 #include "r_main.h"
+#include "r_stereo.h" // R_DrawAcrossStereoEyes
 #include "m_cond.h" // for emblems
 
 #include "m_argv.h"
@@ -2823,7 +2824,7 @@ boolean P_SetupLevel(boolean skipprecip)
 	// This is needed. Don't touch.
 	maptol = mapheaderinfo[gamemap-1]->typeoflevel;
 
-	CON_Drawer(); // let the user know what we are going to do
+	R_DrawAcrossStereoEyes(CON_Drawer); // let the user know what we are going to do
 	I_FinishUpdate(); // page flip or blit buffer
 
 	// Initialize sector node list.

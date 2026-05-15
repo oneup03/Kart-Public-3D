@@ -29,6 +29,7 @@
 #include "d_main.h"
 #include "m_misc.h" // movie mode
 #include "d_clisrv.h" // So the network state can be updated during the wipe
+#include "r_stereo.h" // R_DrawAcrossStereoEyes
 
 #ifdef HWRENDER
 #include "hardware/hw_main.h"
@@ -388,7 +389,10 @@ void F_RunWipe(UINT8 wipetype, boolean drawMenu)
 #ifdef HAVE_THREADS
 			I_lock_mutex(&m_menu_mutex);
 #endif
-			M_Drawer(); // menu is drawn even on top of wipes
+			// Stereoscopic 3D: F_RunWipe runs outside the D_Display eye loop,
+			// so the menu overlay needs its own per-eye pass - otherwise it
+			// loses HUD parallax depth for the duration of the transition.
+			R_DrawAcrossStereoEyes(M_Drawer); // menu is drawn even on top of wipes
 #ifdef HAVE_THREADS
 			I_unlock_mutex(m_menu_mutex);
 #endif

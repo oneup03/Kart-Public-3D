@@ -593,6 +593,8 @@ OBJS:=$(i_main_o) \
 		$(OBJDIR)/r_segs.o   \
 		$(OBJDIR)/r_sky.o    \
 		$(OBJDIR)/r_splats.o \
+		$(OBJDIR)/r_stereo.o \
+		$(OBJDIR)/r_stereo_leiasr.o \
 		$(OBJDIR)/r_things.o \
 		$(OBJDIR)/screen.o   \
 		$(OBJDIR)/v_video.o  \

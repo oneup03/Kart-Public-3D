@@ -41,6 +41,7 @@
 #include "mserv.h"
 #include "y_inter.h"
 #include "r_local.h"
+#include "r_stereo.h" // net_stereo_render_in_progress
 #include "m_argv.h"
 #include "p_setup.h"
 #include "lzf.h"
@@ -6213,6 +6214,12 @@ void NetUpdate(void)
 	tic_t nowtime;
 	INT32 i;
 	INT32 realtics;
+
+	// Stereoscopic 3D: HWR_RenderFrame calls NetUpdate once per eye pass.
+	// Running it between eye passes can flip displayplayer and mutate mob
+	// state, desyncing the two eyes - hold off until the frame is finished.
+	if (net_stereo_render_in_progress)
+		return;
 
 	nowtime = I_GetTime();
 	realtics = nowtime - gametime;

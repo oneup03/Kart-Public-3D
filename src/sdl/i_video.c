@@ -77,6 +77,7 @@
 #ifdef HWRENDER
 #include "../hardware/hw_main.h"
 #include "../hardware/hw_drv.h"
+#include "../r_stereo_leiasr.h"
 // For dynamic referencing of HW rendering functions
 #include "hwsym_sdl.h"
 #include "ogl_sdl.h"
@@ -1483,6 +1484,31 @@ void I_ReadScreen(UINT8 *scr)
 			vid.rowbytes, vid.rowbytes);
 }
 
+// Native window handle accessor. Used by the LeiaSR shim loader
+// (r_stereo_leiasr.c) on Windows so the SR weaver can hook the output
+// window. Returns NULL before SDL has created the window or on non-Windows
+// builds where LeiaSR is a no-op anyway.
+void *I_GetWindowHandle(void)
+{
+#ifdef _WIN32
+	SDL_SysWMinfo info;
+
+	if (!window)
+		return NULL;
+
+	SDL_VERSION(&info.version);
+	if (!SDL_GetWindowWMInfo(window, &info))
+		return NULL;
+
+	if (info.subsystem != SDL_SYSWM_WINDOWS)
+		return NULL;
+
+	return (void *)info.info.win.window;
+#else
+	return NULL;
+#endif
+}
+
 //
 // I_SetPalette
 //
@@ -2032,6 +2058,13 @@ void I_StartupGraphics(void)
 		HWD.pfnStartBatching = hwSym("StartBatching",NULL);
 		HWD.pfnRenderBatches = hwSym("RenderBatches",NULL);
 
+		HWD.pfnSetStereoMode     = hwSym("SetStereoMode",NULL);
+		HWD.pfnReapplyStereoMode = hwSym("ReapplyStereoMode",NULL);
+		HWD.pfnResetStereoMode   = hwSym("ResetStereoMode",NULL);
+
+		HWD.pfnMakeScreenTextureSized  = hwSym("MakeScreenTextureSized",NULL);
+		HWD.pfnDrawInterlacedComposite = hwSym("DrawInterlacedComposite",NULL);
+
 		if (!HWD.pfnInit()) // load the OpenGL library
 			rendermode = render_soft;
 	}
@@ -2123,6 +2156,11 @@ void I_ShutdownGraphics(void)
 	I_OutputMsg("shut down\n");
 
 #ifdef HWRENDER
+	// Tear the LeiaSR weaver down before the GL context goes away - the SR
+	// runtime holds GL resources keyed to this context and may segfault
+	// later if those outlive the context.
+	R_LeiaSR_Shutdown();
+
 	if (GLUhandle)
 		hwClose(GLUhandle);
 	if (sdlglcontext)

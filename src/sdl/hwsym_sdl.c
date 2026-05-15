@@ -114,6 +114,13 @@ void *hwSym(const char *funcName,void *handle)
 	GETFUNC(StartBatching);
 	GETFUNC(RenderBatches);
 
+	GETFUNC(SetStereoMode);
+	GETFUNC(ReapplyStereoMode);
+	GETFUNC(ResetStereoMode);
+
+	GETFUNC(MakeScreenTextureSized);
+	GETFUNC(DrawInterlacedComposite);
+
 #else //HWRENDER
 	if (0 == strcmp("FinishUpdate", funcName))
 		return funcPointer; //&FinishUpdate;

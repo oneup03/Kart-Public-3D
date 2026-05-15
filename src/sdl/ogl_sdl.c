@@ -227,6 +227,16 @@ void OglSdlFinishUpdate(boolean waitvbl)
 
 	HWR_MakeScreenFinalTexture();
 	HWR_DrawScreenFinalTexture(sdlw, sdlh);
+	// Stereoscopic 3D: for the shader-composite modes (anaglyph, row /
+	// column-interlaced, checkerboard) this recaptures the now-stretched
+	// SbS/TaB content at display resolution and runs the matching composite
+	// shader on a fullscreen quad. For LeiaSR it recaptures and hands the
+	// texture to the SR weaver (when the shim DLL is loaded; otherwise this
+	// is a no-op and the SbS already drawn above is the final image).
+	// A no-op in every other mode. Do NOT call GClipRect between the
+	// recapture and the weave - srb2-stereo-3d skill pitfall 4: a clip rect
+	// with sdlh > screen_height computes a negative GL Y for the weaver.
+	HWR_DrawStereoComposite(sdlw, sdlh);
 	SDL_GL_SwapWindow(window);
 
 	GClipRect(0, 0, realwidth, realheight, NZCLIP_PLANE);

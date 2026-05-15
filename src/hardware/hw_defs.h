@@ -159,6 +159,11 @@ typedef struct
 #endif
 	boolean     shearing;        // 14042019
 	angle_t     viewaiming;      // 17052019
+	// Stereoscopic 3D
+	INT8        eyeOffset;       // -1 left eye, 0 mono, +1 right eye
+	FLOAT       iod;             // signed world-unit eye separation
+	FLOAT       focalLength;     // convergence plane distance, world units
+	boolean     skyboxPass;      // collapse the eye translate for the skybox
 } FTransform;
 
 // Transformed vector, as passed to HWR API

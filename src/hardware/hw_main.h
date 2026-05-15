@@ -83,6 +83,14 @@ void HWR_DoWipe(UINT8 wipenum, UINT8 scrnnum);
 void HWR_MakeScreenFinalTexture(void);
 void HWR_DrawScreenFinalTexture(int width, int height);
 
+// hw_main.c: Stereoscopic 3D
+void HWR_SetStereoMode(INT32 mode, INT32 eye, INT32 x, INT32 y, INT32 w, INT32 h);
+void HWR_ReapplyStereoMode(void);
+void HWR_ResetStereoMode(void);
+void HWR_ClearStereoBackbuffer(void);
+unsigned int HWR_MakeScreenTextureSized(int width, int height);
+void HWR_DrawStereoComposite(int width, int height);
+
 // hw_main.c: Planes
 void HWR_RenderPlane(extrasubsector_t *xsub, boolean isceiling, fixed_t fixedheight, FBITFIELD PolyFlags, INT32 lightlevel, lumpnum_t lumpnum, sector_t *FOFsector, UINT8 alpha, extracolormap_t *planecolormap);
 void HWR_AddTransparentFloor(lumpnum_t lumpnum, extrasubsector_t *xsub, boolean isceiling, fixed_t fixedheight, INT32 lightlevel, INT32 alpha, sector_t *FOFSector, FBITFIELD blend, boolean fogplane, extracolormap_t *planecolormap);

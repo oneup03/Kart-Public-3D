@@ -10,11 +10,12 @@
 # DLLs are also copied there so the build is immediately runnable.
 #
 # Usage:
-#   ./build.sh [--clean] [--no-dlls] [--jobs N]
+#   ./build.sh [--clean] [--no-dlls] [--no-shim] [--jobs N]
 #
 # Options:
 #   --clean      run "make clean" for the Mingw64 target before building
 #   --no-dlls    skip staging the runtime DLLs (output dir and testing folder)
+#   --no-shim    skip the optional LeiaSR shim DLL build (MSVC-only step)
 #   --jobs N     parallel make jobs (default: number of CPUs)
 #
 # Environment overrides:
@@ -32,11 +33,13 @@ PREFIX="${PREFIX:-x86_64-w64-mingw32}"
 JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
 DO_CLEAN=0
 COPY_DLLS=1
+DO_SHIM=1
 
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--clean)    DO_CLEAN=1 ;;
 		--no-dlls)  COPY_DLLS=0 ;;
+		--no-shim)  DO_SHIM=0 ;;
 		--jobs)     JOBS="$2"; shift ;;
 		--jobs=*)   JOBS="${1#*=}" ;;
 		-h|--help)  sed -n '2,/^$/p' "$0" | sed 's/^# \?//'; exit 0 ;;
@@ -44,6 +47,17 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
+
+# Initialize the LeiaSR64 submodule on demand - only when we'd actually use
+# it for the shim build. CI runs this script with --no-shim and supplies a
+# prebuilt leiasr_shim.dll via artifact, so it doesn't need the submodule at
+# all (and doesn't have credentials for it on a public PAT-less runner).
+if [ "$DO_SHIM" = 1 ] && [ -f .gitmodules ] && \
+   [ ! -e libs/LeiaSR64/Readme.txt ] && command -v git >/dev/null 2>&1; then
+	echo ">> initializing libs/LeiaSR64 submodule"
+	git submodule update --init libs/LeiaSR64 2>/dev/null || \
+		echo "   (skipped - submodule init failed; LeiaSR shim DLL will not build)"
+fi
 
 # Resolve toolchain binaries: prefer the prefixed names (Linux cross-compiler),
 # fall back to unprefixed (a native Windows MinGW-w64 install ships those).
@@ -110,7 +124,38 @@ OUT=bin/Mingw64/Release
 [ -f "$OUT/srb2kart.exe" ] || { echo "build.sh: expected $OUT/srb2kart.exe, not found" >&2; exit 1; }
 echo ">> built     : $OUT/srb2kart.exe"
 
-# 4. Stage runtime DLLs next to the executable, and into the play-test folder.
+# 4. Build the optional LeiaSR shim DLL (MSVC). See leiasr_shim/README.md for
+#    what this is. CMake auto-picks an installed Visual Studio toolchain on
+#    Windows; on Linux the configure step has no valid Win32 generator and
+#    will fail cleanly, which we treat as "no shim, fall back to SbS". Any
+#    failure here is non-fatal - the staging block below just won't find the
+#    DLL, and LeiaSR stereo mode silently degrades to plain Side-by-Side.
+if [ "$DO_SHIM" = 1 ] && [ -f leiasr_shim/CMakeLists.txt ]; then
+	if command -v cmake >/dev/null 2>&1; then
+		echo ">> building LeiaSR shim DLL (MSVC)"
+		# Configure separately from build so we can distinguish "no MSVC
+		# toolchain at all" from "shim source broke". -A x64 implies the
+		# Visual Studio generator; on non-Windows this fails fast.
+		if cmake -S leiasr_shim -B leiasr_shim/build -A x64 >/tmp/shim-configure.log 2>&1; then
+			if cmake --build leiasr_shim/build --config Release >/tmp/shim-build.log 2>&1; then
+				echo "   shim built  : leiasr_shim/build/Release/leiasr_shim.dll"
+			else
+				echo "   WARN: shim compile failed (see /tmp/shim-build.log); LeiaSR mode will fall back to SbS"
+			fi
+		else
+			# Quiet during cross-compile / missing-MSVC - this is expected on
+			# Linux CI runners. Loud when CMake is present but VS isn't, so
+			# a Windows user notices their toolchain is missing.
+			if [ "${OSTYPE:-}" = "msys" ] || [ "${OSTYPE:-}" = "cygwin" ] || \
+			   [ "${OS:-}" = "Windows_NT" ]; then
+				echo "   WARN: shim configure failed (see /tmp/shim-configure.log); is Visual Studio installed?"
+				echo "         (LeiaSR mode will fall back to SbS)"
+			fi
+		fi
+	fi
+fi
+
+# 5. Stage runtime DLLs next to the executable, and into the play-test folder.
 TESTDIR="${TESTDIR:-testing}"
 DLLS=(
 	libs/curl/lib64/libcurl-x64.dll
@@ -119,13 +164,38 @@ DLLS=(
 	libs/SDL2/x86_64-w64-mingw32/bin/SDL2.dll
 	libs/SDL2_mixer/x86_64-w64-mingw32/bin/*.dll
 )
+
+# Optional LeiaSR shim - built separately (leiasr_shim/CMakeLists.txt, MSVC).
+# Absence is fine; the engine's runtime loader treats it as "LeiaSR
+# unavailable" and falls back to plain SbS for that mode. We probe both the
+# default CMake output dir and a flat leiasr_shim.dll the user dropped at
+# the shim project root, in that order.
+LEIASR_SHIMS=()
+for cand in \
+	leiasr_shim/build/Release/leiasr_shim.dll \
+	leiasr_shim/leiasr_shim.dll \
+; do
+	if [ -f "$cand" ]; then
+		LEIASR_SHIMS=("$cand")
+		break
+	fi
+done
+
 if [ "$COPY_DLLS" = 1 ]; then
 	echo ">> staging runtime DLLs into $OUT"
 	cp -f "${DLLS[@]}" "$OUT/"
 
+	if [ ${#LEIASR_SHIMS[@]} -gt 0 ]; then
+		echo ">> staging LeiaSR shim DLL (${LEIASR_SHIMS[0]})"
+		cp -f "${LEIASR_SHIMS[@]}" "$OUT/"
+	fi
+
 	if [ -d "$TESTDIR" ]; then
 		echo ">> copying srb2kart.exe + DLLs into $TESTDIR/"
 		cp -f "$OUT/srb2kart.exe" "${DLLS[@]}" "$TESTDIR/"
+		if [ ${#LEIASR_SHIMS[@]} -gt 0 ]; then
+			cp -f "${LEIASR_SHIMS[@]}" "$TESTDIR/"
+		fi
 	fi
 fi
 

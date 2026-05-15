@@ -31,6 +31,8 @@
 #include "../r_local.h"
 #include "../r_bsp.h"	// R_NoEncore
 #include "../r_main.h"	// cv_fov
+#include "../r_stereo.h"	// stereoscopic 3D
+#include "../r_stereo_leiasr.h"	// LeiaSR shim DLL loader
 #include "../d_clisrv.h"
 #include "../w_wad.h"
 #include "../z_zone.h"
@@ -4573,6 +4575,14 @@ void HWR_DrawSkyBackground(float fpov)
 	dometransform.fovyangle = fpov; // Tails
 	dometransform.splitscreen = splitscreen;
 
+	// Stereoscopic 3D: the sky dome takes the eye's frustum shear but skips
+	// the eye translate (skyboxPass), so it sits at infinity parallax and
+	// does not double up as the view turns.
+	dometransform.eyeOffset = atransform.eyeOffset;
+	dometransform.iod = atransform.iod;
+	dometransform.focalLength = atransform.focalLength;
+	dometransform.skyboxPass = true;
+
 	HWR_GetTexture(texturetranslation[skytexture]);
 	HWD.pfnSetShader(7);	// sky shader
 	HWD.pfnRenderSkyDome(skytexture, textures[skytexture]->width, textures[skytexture]->height, dometransform);
@@ -4590,6 +4600,10 @@ static inline void HWR_ClearView(void)
 	                 (INT32)(gr_viewwindowx + gr_viewwidth),
 	                 (INT32)(gr_viewwindowy + gr_viewheight),
 	                 ZCLIP_PLANE);
+	// GClipRect just clobbered the GL viewport/scissor; restore the eye's
+	// rect so the depth clear below only touches this eye's region.
+	if (R_StereoActive())
+		HWD.pfnReapplyStereoMode();
 	HWD.pfnClearBuffer(false, true, 0);
 }
 
@@ -4708,6 +4722,16 @@ void HWR_RenderFrame(INT32 viewnumber, player_t *player, boolean skybox)
 	if (*postprocessor == postimg_mirror)
 		atransform.mirror = true;
 
+	// Stereoscopic 3D per-eye projection. eyeOffset stays 0 (and the renderer
+	// stays on the mono GLPerspective path) whenever the stereo eye loop is
+	// not running; the iod sign is what actually drives the parallax.
+	// The skybox-object pass (the distant backdrop scene) skips the eye
+	// translate just like the sky dome, so it sits at infinity parallax.
+	atransform.eyeOffset = R_GetCurrentEye();
+	atransform.iod = R_GetStereoIOD();
+	atransform.focalLength = R_GetStereoFocal();
+	atransform.skyboxPass = skybox;
+
 	// Clear view, set viewport (glViewport), set perspective...
 	HWR_ClearView();
 	HWR_ClearSprites();
@@ -4774,6 +4798,11 @@ void HWR_RenderFrame(INT32 viewnumber, player_t *player, boolean skybox)
 	// added by Hurdler for correct splitscreen
 	// moved here by hurdler so it works with the new near clipping plane
 	HWD.pfnGClipRect(0, 0, vid.width, vid.height, NZCLIP_PLANE);
+
+	// Restore this eye's viewport/scissor after the full-screen GClipRect
+	// above, so the next per-player pass starts in the right region.
+	if (R_StereoActive())
+		HWD.pfnReapplyStereoMode();
 }
 
 // ==========================================================================
@@ -4784,7 +4813,9 @@ void HWR_RenderPlayerView(INT32 viewnumber, player_t *player)
 	const boolean skybox = (skyboxmo[0] && cv_skybox.value); // True if there's a skybox object and skyboxes are on
 
 	// Clear the color buffer, stops HOMs. Also seems to fix the skybox issue on Intel GPUs.
-	if (viewnumber == 0) // Only do it if it's the first screen being rendered
+	// In stereo this clear is scissor-gated to one eye's region, so it would wipe the
+	// other eye's content - D_Display does a single full-screen clear before the eye loop instead.
+	if (viewnumber == 0 && !R_StereoActive()) // Only do it if it's the first screen being rendered
 	{
 		FRGBAFloat ClearColor;
 
@@ -4979,8 +5010,10 @@ void HWR_DoPostProcessor(player_t *player)
 	if(gamestate != GS_INTERMISSION)
 		HWD.pfnMakeScreenTexture();
 
-	if (splitscreen) // Not supported in splitscreen - someone want to add support?
-		return;
+	// Splitscreen post-processing: HWR_DoPostProcessor runs once per player
+	// with the GL viewport already set to that player's region, and
+	// PostImgRedraw samples the matching sub-region of the captured texture,
+	// so the wave is confined to the correct player (and eye in stereo).
 
 	// Drunken vision! WooOOooo~
 	if (*type == postimg_water || *type == postimg_heat)
@@ -5067,8 +5100,31 @@ void HWR_DoWipe(UINT8 wipenum, UINT8 scrnnum)
 		return; // again, shouldn't get here if it is a bad size
 	}
 
-	HWR_GetFadeMask(lumpnum);
-	HWD.pfnDoScreenWipe();
+	// Stereoscopic 3D: run the wipe once per eye so the fade-mask pattern
+	// picks up each eye's HUD-depth parallax instead of sitting flat on the
+	// screen plane. The fade mask must be (re)bound before each eye's draw.
+	if (R_StereoActive())
+	{
+		INT32 eye;
+		for (eye = 0; eye < R_StereoNumEyes(); eye++)
+		{
+			INT32 ex, ey, ew, eh;
+			fixed_t hudshift;
+			R_StereoComputePlayerEyeRect(R_StereoMode(), eye, -1, &ex, &ey, &ew, &eh);
+			HWD.pfnSetStereoMode(R_StereoMode(), eye, ex, ey, ew, eh);
+			R_BeginStereoEye(eye);
+			hudshift = R_GetStereoHUDShift();
+			HWR_GetFadeMask(lumpnum);
+			HWD.pfnDoScreenWipe(FIXED_TO_FLOAT(hudshift) / (float)BASEVIDWIDTH);
+			R_EndStereoEye();
+		}
+		HWD.pfnResetStereoMode();
+	}
+	else
+	{
+		HWR_GetFadeMask(lumpnum);
+		HWD.pfnDoScreenWipe(0.0f);
+	}
 }
 
 void HWR_MakeScreenFinalTexture(void)
@@ -5078,7 +5134,79 @@ void HWR_MakeScreenFinalTexture(void)
 
 void HWR_DrawScreenFinalTexture(int width, int height)
 {
-    HWD.pfnDrawScreenFinalTexture(width, height);
+    // Stereoscopic 3D: stretch the backbuffer to fill the window (no aspect
+    // black bars) whenever a stereo mode is active, so the SbS/TaB signal
+    // reaches the display intact. Mono keeps the original aspect handling.
+    HWD.pfnDrawScreenFinalTexture(width, height, R_StereoActive());
+}
+
+// Stereoscopic 3D: wrappers so callers that cannot see HWD (ogl_sdl.c under
+// _CREATE_DLL_, and the engine side) can drive the per-eye viewport.
+void HWR_SetStereoMode(INT32 mode, INT32 eye, INT32 x, INT32 y, INT32 w, INT32 h)
+{
+	HWD.pfnSetStereoMode(mode, eye, x, y, w, h);
+}
+
+void HWR_ReapplyStereoMode(void)
+{
+	HWD.pfnReapplyStereoMode();
+}
+
+void HWR_ResetStereoMode(void)
+{
+	HWD.pfnResetStereoMode();
+}
+
+// One full-screen color clear with the scissor dropped first, done once per
+// frame before the stereo eye loop. The per-view clear in HWR_RenderPlayerView
+// is scissor-gated and skipped while stereo is active, so it cannot do this.
+void HWR_ClearStereoBackbuffer(void)
+{
+	FRGBAFloat ClearColor;
+	ClearColor.red = ClearColor.green = ClearColor.blue = 0.0f;
+	ClearColor.alpha = 1.0f;
+	HWD.pfnResetStereoMode();
+	HWD.pfnClearBuffer(true, false, &ClearColor);
+}
+
+// Recapture the backbuffer at exactly w x h (NPOT) for the composite pass.
+// Returns the GL texture id so the LeiaSR present path can pass it to the
+// SR weaver; the composite shader path doesn't need the id and ignores it.
+unsigned int HWR_MakeScreenTextureSized(int width, int height)
+{
+	return HWD.pfnMakeScreenTextureSized(width, height);
+}
+
+// Stereoscopic 3D present-time composite. Dispatches on the raw cv_stereomode
+// value (so the user's choice of anaglyph vs interlaced vs checkerboard picks
+// the matching shader, and LeiaSR routes to the SR weaver instead). For plain
+// SbS/TaB and Off this is a no-op - the already-stretched present is final.
+// LeiaSR also bypasses the weave path when the shim DLL or SR runtime is
+// missing (R_LeiaSR_Available() = false), and when splitscreen is on - both
+// cases were already substituted to plain SbS by R_StereoMode() in the eye
+// loop, so the player still sees SbS, just unwoven.
+void HWR_DrawStereoComposite(int width, int height)
+{
+	int shaderindex;
+	switch (cv_stereomode.value)
+	{
+		case STEREO_ANAGLYPH:          shaderindex = HWR_SHADER_COMPOSITE_ANAGLYPH_DUBOIS;   break;
+		case STEREO_ROW_INTERLACED:    shaderindex = HWR_SHADER_COMPOSITE_ROW_INTERLACED;    break;
+		case STEREO_COLUMN_INTERLACED: shaderindex = HWR_SHADER_COMPOSITE_COLUMN_INTERLACED; break;
+		case STEREO_CHECKERBOARD:      shaderindex = HWR_SHADER_COMPOSITE_CHECKERBOARD;      break;
+
+		case STEREO_LEIASR:
+			if (!splitscreen && R_LeiaSR_Available())
+			{
+				unsigned int tex = HWD.pfnMakeScreenTextureSized(width, height);
+				R_LeiaSR_Weave(tex, width, height);
+			}
+			return;
+
+		default: return; // not a shader-composite mode; nothing to composite
+	}
+	HWD.pfnMakeScreenTextureSized(width, height);
+	HWD.pfnDrawInterlacedComposite(shaderindex, width, height);
 }
 
 // jimita 18032019

@@ -24,6 +24,7 @@
 #include "console.h"
 #include "r_fps.h"
 #include "r_local.h"
+#include "r_stereo.h" // stereoscopic 3D cvars
 #include "hu_stuff.h"
 #include "g_game.h"
 #include "g_input.h"
@@ -306,6 +307,7 @@ static void M_ResetControls(INT32 choice);
 
 // Video & Sound
 menu_t OP_VideoOptionsDef, OP_VideoModeDef;
+menu_t OP_Stereo3DDef;
 #ifdef HWRENDER
 menu_t OP_OpenGLOptionsDef, OP_OpenGLColorDef;
 #endif
@@ -1281,6 +1283,8 @@ static menuitem_t OP_VideoOptionsMenu[] =
 #ifdef HWRENDER
 	{IT_SUBMENU|IT_STRING,	NULL,	"OpenGL Options...",	&OP_OpenGLOptionsDef,	130},
 #endif
+
+	{IT_SUBMENU|IT_STRING,	NULL,	"Stereoscopic 3D...",	&OP_Stereo3DDef,		140},
 };
 
 enum
@@ -1301,11 +1305,23 @@ enum
 #ifdef HWRENDER
 	op_video_ogl,
 #endif
+	op_video_stereo3d,
 };
 
 static menuitem_t OP_VideoModeMenu[] =
 {
 	{IT_KEYHANDLER | IT_NOTHING, NULL, "", M_HandleVideoMode, '\0'},     // dummy menuitem for the control func
+};
+
+static menuitem_t OP_Stereo3DMenu[] =
+{
+	{IT_STRING|IT_CVAR,              NULL, "Display Mode",     &cv_stereomode,            10},
+	{IT_STRING|IT_CVAR,              NULL, "Swap Eyes",        &cv_stereoswap,            20},
+
+	{IT_STRING|IT_CVAR|IT_CV_SLIDER, NULL, "Eye Separation",   &cv_stereoipd,             40},
+	{IT_STRING|IT_CVAR|IT_CV_SLIDER, NULL, "Convergence",      &cv_stereofoclen,          50},
+
+	{IT_STRING|IT_CVAR|IT_CV_SLIDER, NULL, "HUD Depth",        &cv_stereohuddepth,        70},
 };
 
 #ifdef HWRENDER
@@ -2058,6 +2074,8 @@ menu_t OP_VideoModeDef =
 	0,
 	NULL
 };
+
+menu_t OP_Stereo3DDef = DEFAULTMENUSTYLE("M_VIDEO", OP_Stereo3DMenu, &OP_VideoOptionsDef, 30, 30);
 
 menu_t OP_SoundOptionsDef =
 {
@@ -3678,6 +3696,13 @@ static void M_DrawSlider(INT32 x, INT32 y, const consvar_t *cv, boolean ontop)
 
 	if (ontop)
 	{
+		// Show the current numeric value while the slider is active. Lives
+		// in the gap between the menu label (left) and the slider's left
+		// arrow (right), right-aligned just past the arrow's animation
+		// sweep so it doesn't jitter alongside the bouncing arrow.
+		INT32 vw = V_StringWidth(cv->string, 0);
+		V_DrawString(x - 24 - vw, y, highlightflags, cv->string);
+
 		V_DrawCharacter(x - 16 - (skullAnimCounter/5), y,
 			'\x1C' | highlightflags, false); // left arrow
 		V_DrawCharacter(x+(SLIDER_RANGE*8) + 8 + (skullAnimCounter/5), y,
@@ -11469,6 +11494,13 @@ static INT32 quitsounds[] =
 	sfx_screec
 };
 
+// The GAMEQUIT hold screen, factored out so it can be drawn per-eye in stereo.
+static void M_QuitScreenDrawer(void)
+{
+	V_DrawFill(0, 0, BASEVIDWIDTH, BASEVIDHEIGHT, 31);
+	V_DrawSmallScaledPatch(0, 0, 0, W_CachePatchName("GAMEQUIT", PU_CACHE)); // Demo 3 Quit Screen Tails 06-16-2001
+}
+
 void M_QuitResponse(INT32 ch)
 {
 	tic_t ptime;
@@ -11485,8 +11517,7 @@ void M_QuitResponse(INT32 ch)
 		ptime = I_GetTime() + NEWTICRATE*2; // Shortened the quit time, used to be 2 seconds Tails 03-26-2001
 		while (ptime > I_GetTime())
 		{
-			V_DrawFill(0, 0, BASEVIDWIDTH, BASEVIDHEIGHT, 31);
-			V_DrawSmallScaledPatch(0, 0, 0, W_CachePatchName("GAMEQUIT", PU_CACHE)); // Demo 3 Quit Screen Tails 06-16-2001
+			R_DrawAcrossStereoEyes(M_QuitScreenDrawer);
 			I_FinishUpdate(); // Update the screen with the image Tails 06-19-2001
 			I_Sleep(cv_sleep.value);
 			I_UpdateTime(cv_timescale.value);

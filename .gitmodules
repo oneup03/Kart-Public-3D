@@ -1,0 +1,4 @@
+[submodule "LeiaSR64"]
+	path = libs/LeiaSR64
+	url = https://github.com/oneup03/LeiaSR64.git
+	branch = main

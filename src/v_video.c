@@ -15,6 +15,7 @@
 
 #include "doomdef.h"
 #include "r_local.h"
+#include "r_stereo.h" // R_GetStereoHUDShift
 #include "v_video.h"
 #include "hu_stuff.h"
 #include "r_draw.h"
@@ -347,7 +348,16 @@ void V_DrawFixedPatch(fixed_t x, fixed_t y, fixed_t pscale, INT32 scrn, patch_t 
 	//if (rendermode != render_soft && !con_startup)		// Why?
 	if (rendermode == render_opengl)
 	{
-		HWR_DrawFixedPatch((GLPatch_t *)patch, x, y, pscale, scrn, colormap);
+		// Stereoscopic 3D: shift HUD elements (and, via the string drawers,
+		// all text) horizontally per eye for the configured parallax depth.
+		// The shift is zero by default and whenever stereo is off.
+		fixed_t hudshift = R_GetStereoHUDShift();
+		// V_NOSCALESTART coordinates are raw screen pixels, not base coords,
+		// so the base-coord parallax shift must be pre-scaled to match -
+		// otherwise NOSCALESTART backgrounds barely move while text moves fully.
+		if (scrn & V_NOSCALESTART)
+			hudshift *= (vid.dupx < vid.dupy ? vid.dupx : vid.dupy);
+		HWR_DrawFixedPatch((GLPatch_t *)patch, x + hudshift, y, pscale, scrn, colormap);
 		return;
 	}
 #endif
@@ -569,7 +579,8 @@ void V_DrawCroppedPatch(fixed_t x, fixed_t y, fixed_t pscale, INT32 scrn, patch_
 #ifdef HWRENDER
 	if (rendermode == render_opengl)
 	{
-		HWR_DrawCroppedPatch((GLPatch_t*)patch,x,y,pscale,scrn,sx,sy,w,h);
+		// Stereoscopic 3D: per-eye HUD parallax shift.
+		HWR_DrawCroppedPatch((GLPatch_t*)patch,x + R_GetStereoHUDShift(),y,pscale,scrn,sx,sy,w,h);
 		return;
 	}
 #endif
@@ -727,7 +738,8 @@ void V_DrawFill(INT32 x, INT32 y, INT32 w, INT32 h, INT32 c)
 #ifdef HWRENDER
 	if (rendermode == render_opengl)
 	{
-		HWR_DrawFill(x, y, w, h, c);
+		// Stereoscopic 3D: shift per eye for the configured HUD parallax depth.
+		HWR_DrawFill(x + (R_GetStereoHUDShift() >> FRACBITS), y, w, h, c);
 		return;
 	}
 #endif
@@ -848,7 +860,8 @@ void V_DrawFillConsoleMap(INT32 x, INT32 y, INT32 w, INT32 h, INT32 c)
 	if (rendermode == render_opengl)
 	{
 		UINT32 hwcolor = V_GetHWConsBackColor();
-		HWR_DrawConsoleFill(x, y, w, h, hwcolor, c);	// we still use the regular color stuff but only for flags. actual draw color is "hwcolor" for this.
+		// Stereoscopic 3D: per-eye HUD parallax shift.
+		HWR_DrawConsoleFill(x + (R_GetStereoHUDShift() >> FRACBITS), y, w, h, hwcolor, c);	// we still use the regular color stuff but only for flags. actual draw color is "hwcolor" for this.
 		return;
 	}
 #endif
@@ -1058,7 +1071,8 @@ void V_DrawFlatFill(INT32 x, INT32 y, INT32 w, INT32 h, lumpnum_t flatnum)
 #ifdef HWRENDER
 	if (rendermode == render_opengl)
 	{
-		HWR_DrawFlatFill(x, y, w, h, flatnum);
+		// Stereoscopic 3D: per-eye HUD parallax shift.
+		HWR_DrawFlatFill(x + (R_GetStereoHUDShift() >> FRACBITS), y, w, h, flatnum);
 		return;
 	}
 #endif
@@ -2325,7 +2339,9 @@ INT32 V_ThinStringWidth(const char *string, INT32 option)
 		if ((UINT8)c >= 0x80 && (UINT8)c <= 0x8F) //color parsing! -Inuyasha 2.16.09
 			continue;
 
-		if (!lowercase || !tny_font[c-HU_FONTSTART])
+		// Bounds-check before indexing tny_font: control chars and spaces
+		// land below HU_FONTSTART and would read out of bounds otherwise.
+		if (!lowercase || (c >= HU_FONTSTART && (c-HU_FONTSTART) < HU_FONTSIZE && !tny_font[c-HU_FONTSTART]))
 			c = toupper(c);
 		c -= HU_FONTSTART;
 
