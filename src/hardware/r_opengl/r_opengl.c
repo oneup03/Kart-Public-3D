@@ -3368,6 +3368,27 @@ EXPORT void HWRAPI(PostImgRedraw) (float points[SCREENVERTS][SCREENVERTS][2])
 	pglDisable(GL_DEPTH_TEST);
 	pglDisable(GL_BLEND);
 
+	// The wave grid + black backdrop use clip-space-ish coords (+/-4.5 at
+	// z=4.4) hand-tuned to a ~90deg perspective FOV. If we leave the caller's
+	// projection in place, splitscreen's FOV correction (17/10 tan fudge,
+	// doubled aspect from SetTransform's special_splitscreen branch) shrinks
+	// the quad to ~half the viewport width and produces a squished wave with
+	// black bars on the sides. Push our own ortho instead so the wave fills
+	// the viewport 1:1 regardless of the caller's projection - the viewport
+	// + scissor still clip the result to this player/eye region. Mirrors
+	// the pattern DrawInterlacedComposite uses for its fullscreen quad.
+	pglMatrixMode(GL_PROJECTION);
+	pglPushMatrix();
+	pglLoadIdentity();
+	// Equivalent to glOrtho(-4.5, 4.5, -4.5, 4.5, -10, 10) without taking a
+	// dependency on pglOrtho in the GL loader. Maps +/-4.5 -> +/-1 NDC on
+	// x/y; z=4.4 -> NDC z=-0.44 and z=6 (blackBack) -> NDC z=-0.6, both
+	// inside the [-1,1] clip range.
+	pglScalef(2.0f / 9.0f, 2.0f / 9.0f, -1.0f / 10.0f);
+	pglMatrixMode(GL_MODELVIEW);
+	pglPushMatrix();
+	pglLoadIdentity();
+
 	// Draw a black square behind the screen texture,
 	// so nothing shows through the edges
 	pglColor4ubv(white);
@@ -3420,6 +3441,11 @@ EXPORT void HWRAPI(PostImgRedraw) (float points[SCREENVERTS][SCREENVERTS][2])
 			pglDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 		}
 	}
+
+	pglMatrixMode(GL_PROJECTION);
+	pglPopMatrix();
+	pglMatrixMode(GL_MODELVIEW);
+	pglPopMatrix();
 
 	pglEnable(GL_DEPTH_TEST);
 	pglEnable(GL_BLEND);
