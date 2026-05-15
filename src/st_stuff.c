@@ -1822,8 +1822,22 @@ static void ST_doItemFinderIconsAndSound(void) // SRB2kart - unused.
 //
 static void ST_overlayDrawer(void)
 {
-	//hu_showscores = auto hide score/time/rings when tab rankings are shown
-	if (!(hu_showscores && (netgame || multiplayer)))
+	// hu_showscores = auto hide score/time/rings when tab rankings are shown.
+	// Exception: the battle-fullscreen state (WIN/LOSE/comeback overlay) has
+	// to keep drawing even with the rankings up - otherwise the moment a
+	// player holds TAB after a round, K_drawKartHUD gets skipped and the
+	// per-player WIN/LOSE patch vanishes for everyone. K_drawKartHUD itself
+	// early-returns after K_drawBattleFullscreen when battlefullscreen is
+	// true, so the regular HUD elements still stay hidden under the
+	// rankings overlay - we're just letting the fullscreen patch survive.
+	boolean battlefullscreen = G_BattleGametype()
+		&& (stplyr->exiting
+			|| (stplyr->kartstuff[k_bumper] <= 0
+				&& stplyr->kartstuff[k_comebacktimer]
+				&& comeback
+				&& stplyr->playerstate == PST_LIVE));
+
+	if (battlefullscreen || !(hu_showscores && (netgame || multiplayer)))
 	{
 		K_drawKartHUD();
 

@@ -5132,6 +5132,18 @@ void HWR_MakeScreenFinalTexture(void)
     HWD.pfnMakeScreenFinalTexture();
 }
 
+// Refresh the "screen" texture used by the intermission background and the
+// wave/heat post-process. In stereo this is called once at the end of the
+// D_Display eye loop to overwrite the per-player snapshots taken inside
+// HWR_DoPostProcessor - those run before each eye's HUD pass, so the right
+// eye's snapshot would otherwise miss the right-eye HUD draws (rankings,
+// fade, WIN/LOSE patch) and leave the intermission BG with an asymmetric
+// "left dark with WIN/LOSE, right light without" snapshot.
+void HWR_MakeScreenTexture(void)
+{
+	HWD.pfnMakeScreenTexture();
+}
+
 void HWR_DrawScreenFinalTexture(int width, int height)
 {
     // Stereoscopic 3D: stretch the backbuffer to fill the window (no aspect
@@ -5181,10 +5193,12 @@ unsigned int HWR_MakeScreenTextureSized(int width, int height)
 // value (so the user's choice of anaglyph vs interlaced vs checkerboard picks
 // the matching shader, and LeiaSR routes to the SR weaver instead). For plain
 // SbS/TaB and Off this is a no-op - the already-stretched present is final.
-// LeiaSR also bypasses the weave path when the shim DLL or SR runtime is
-// missing (R_LeiaSR_Available() = false), and when splitscreen is on - both
-// cases were already substituted to plain SbS by R_StereoMode() in the eye
-// loop, so the player still sees SbS, just unwoven.
+// LeiaSR bypasses the weave path when the shim DLL or SR runtime is missing
+// (R_LeiaSR_Available() = false); the eye loop has already rendered SbS, so
+// the player just sees SbS in that case. Splitscreen is fine: our
+// eye-outer/player-inner layout keeps all of every player's L views in the
+// screen's left half and R views in the right half, so the SbS texture
+// handed to the weaver is well-formed regardless of player count.
 void HWR_DrawStereoComposite(int width, int height)
 {
 	int shaderindex;
@@ -5196,7 +5210,7 @@ void HWR_DrawStereoComposite(int width, int height)
 		case STEREO_CHECKERBOARD:      shaderindex = HWR_SHADER_COMPOSITE_CHECKERBOARD;      break;
 
 		case STEREO_LEIASR:
-			if (!splitscreen && R_LeiaSR_Available())
+			if (R_LeiaSR_Available())
 			{
 				unsigned int tex = HWD.pfnMakeScreenTextureSized(width, height);
 				R_LeiaSR_Weave(tex, width, height);

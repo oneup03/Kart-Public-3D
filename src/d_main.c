@@ -619,7 +619,19 @@ static void D_Display(void)
 	R_SetBackbufferIsStereo(R_StereoActive());
 #ifdef HWRENDER
 	if (R_StereoActive())
+	{
 		HWR_ResetStereoMode();
+
+		// Refresh the intermission/wave snapshot texture now that BOTH eye
+		// passes are done. The per-player snapshot inside HWR_DoPostProcessor
+		// fires before each eye's HUD pass, so the final pass 1 snapshot
+		// would otherwise miss the right-eye HUD/rankings/WIN-LOSE/fade
+		// draws and leave the intermission background asymmetric (left-half
+		// fully painted, right-half world-only). Skipped during the
+		// intermission itself, mirroring HWR_DoPostProcessor's own gate.
+		if (gamestate != GS_INTERMISSION)
+			HWR_MakeScreenTexture();
+	}
 #endif
 	net_stereo_render_in_progress = false;
 

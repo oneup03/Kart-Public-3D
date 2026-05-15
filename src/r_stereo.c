@@ -136,13 +136,17 @@ INT32 R_StereoMode(void)
 		case STEREO_COLUMN_INTERLACED:
 		case STEREO_CHECKERBOARD:
 		case STEREO_LEIASR:
-			// LeiaSR collapses to SbS for the internal render - the SR weaver
-			// takes a single full-screen side-by-side texture as input, and
-			// has no notion of splitscreen anyway. The present path
-			// (ogl_sdl.c) still dispatches on raw cv_stereomode.value so the
-			// actual weave happens for LeiaSR and not the others; when the
-			// shim DLL or SR runtime is absent, R_LeiaSR_Available() is false
-			// there and we silently fall back to plain SbS present.
+			// All four modes use SbS as the internal render layout - the
+			// shader composites (anaglyph, column-interlaced, checkerboard)
+			// and the SR weaver all take a full-screen side-by-side texture
+			// as input. Splitscreen is fine for LeiaSR too: the
+			// eye-outer/player-inner layout in R_StereoComputePlayerEyeRect
+			// keeps all players' L views in the screen's left half and R
+			// views in the right half, so the SbS texture is well-formed.
+			// HWR_DrawStereoComposite dispatches on raw cv_stereomode.value
+			// at present time, so this substitution never loses information.
+			// When the LeiaSR shim DLL or SR runtime is absent, the present
+			// path simply skips the weave and the player sees plain SbS.
 			return STEREO_SBS;
 
 		case STEREO_ROW_INTERLACED:

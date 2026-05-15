@@ -81,6 +81,7 @@ void HWR_EndScreenWipe(void);
 void HWR_DrawIntermissionBG(void);
 void HWR_DoWipe(UINT8 wipenum, UINT8 scrnnum);
 void HWR_MakeScreenFinalTexture(void);
+void HWR_MakeScreenTexture(void);
 void HWR_DrawScreenFinalTexture(int width, int height);
 
 // hw_main.c: Stereoscopic 3D
